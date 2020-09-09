@@ -49,14 +49,6 @@ int ARR_MINYELLOW[3] = {MINYELLOW, MINSATYELLOW, MINVALYELLOW};
 int ARR_MAX_C2[3] = {60, 55, 60};
 int ARR_MIN_C2[3] = {0, 0, 0};
 
-// MARCADOR HSV
-// H: 15  S: 40  V: 255
-// H: 0  S: 0  V: 195
-
-// MARCADOR BGR
-// H: 255  S: 255  V: 255
-// H: 220  S: 220  V: 220
-
 
 int ARR_MAXMARCADOR_HSV[3] = {30, 40, 255};
 int ARR_MINMARCADOR_HSV[3] = {0, 0, 150};
@@ -73,6 +65,8 @@ Ptr<cv::ml::KNearest>  kNearest(cv::ml::KNearest::create());
 
 
 // FUNCOES
+
+// Razao da largura pela altura de um RotatedRect
 float razao(RotatedRect rect)
 {
     Point2f pts[4];
@@ -82,6 +76,8 @@ float razao(RotatedRect rect)
     return float( hypot( pts[1].x - pts[0].x, pts[1].y - pts[0].y ) / hypot( pts[2].x - pts[1].x, pts[2].y - pts[1].y ));
 }
 
+
+// Area de um RotatedRect
 float rotated_area(RotatedRect rect)
 {
   Point2f pts[4];
@@ -94,6 +90,8 @@ float rotated_area(RotatedRect rect)
   return area;
 }
 
+
+// Transforma RotatedRect para imagem
 Mat rotateToImage(Mat img, RotatedRect rect)
 {
 
@@ -112,6 +110,8 @@ Mat rotateToImage(Mat img, RotatedRect rect)
     return cropped;
 }
 
+
+// Treino dos XMLs para o KNN
 bool train()
 {
     Mat matClassificationInts;      // we will read the classification numbers into this variable as though it is a vector
@@ -147,6 +147,8 @@ bool train()
    ROS_INFO("TREINO FINALIZADO");
 }
 
+
+// Retorna a string encontrada na imagem (usada para deteccao da porcentagem)
 string getPercent(Mat img)
 {
     if (img.empty()) {
@@ -176,11 +178,15 @@ string getPercent(Mat img)
     return strFinalString;
 }
 
+
+// Inverte o preto com branco
 void invert_color(Mat img)
 {
     bitwise_not(img, img);
 }
 
+
+// Retorna a string encontrada na imagem
 string getKNNChar(Mat img, const char* name)
 {
     Mat matTestingNumbers = img.clone();
@@ -228,9 +234,13 @@ string getKNNChar(Mat img, const char* name)
  
     return strFinalString;
 }
+
 // FIM FUNCOES
 
 
+
+
+// Classe do Tesseract
 class TesseractExtract
 {
 public:
@@ -244,7 +254,7 @@ public:
 
     ocr->Init(NULL, "eng", tesseract::OEM_LSTM_ONLY);
 
-    ocr->SetVariable("tessedit_char_whitelist","0123456789");
+    ocr->SetVariable("tessedit_char_whitelist","0123456789-l");
 
     ocr->SetPageSegMode(tesseract::PSM_SINGLE_LINE);
 
@@ -278,6 +288,7 @@ public:
 };
 
 
+// Classe de detecção das bases
 class LandingMark
 {
 public:
@@ -474,6 +485,7 @@ public:
 };
 
 
+// Classe para melhor controle das areas de interesse
 class ROI
 {
 
@@ -721,7 +733,6 @@ public:
 TesseractExtract tess;
 LandingMark main_image;
 ROI base, marcador;
-
 Mat frame;
 
 
@@ -740,15 +751,14 @@ void imageCallback(const sensor_msgs::ImageConstPtr& msg)
 	{
 		main_image.setImage(cv_bridge::toCvShare(msg, "bgr8")->image);
 
-        Mat base_C1;
+        Mat base_grayscale;
         Mat img_teste, img_inrange;
         Mat img_percent;
         Mat img_number_top, img_number_bot;
 
-        main_image.processImage();
-        // imshow("final", main_image.img_final_C1);
-        // imshow("yellow", main_image.img_yellow_C1);
-        // imshow("blue", main_image.img_blue_C1);
+
+        //////////  BUSCA O MARCADOR APENAS QUANDO ENCONTRA UMA BASE /////////
+        //////////    MARCADOR ESTÁ SEMPRE EM CIMA DE UMA BASE       /////////
 		
 		// Verifica se achou a base
 		if ( main_image.foundMark() )
@@ -758,93 +768,82 @@ void imageCallback(const sensor_msgs::ImageConstPtr& msg)
 
             base.set( main_image.image, main_image.markRotatedRect );
 
-
-            inRange(base.image, Scalar(ARR_MIN_C2[0], ARR_MIN_C2[1], ARR_MIN_C2[2]), Scalar(ARR_MAX_C2[0], ARR_MAX_C2[1], ARR_MAX_C2[2]), base_C1);
-            morphologyEx(base_C1, base_C1, MORPH_CLOSE, kernel);
             detailEnhance(base.image, base.image);
+            inRange(base.image, Scalar(ARR_MIN_C2[0], ARR_MIN_C2[1], ARR_MIN_C2[2]), Scalar(ARR_MAX_C2[0], ARR_MAX_C2[1], ARR_MAX_C2[2]), base_grayscale);
+            morphologyEx(base_grayscale, base_grayscale, MORPH_CLOSE, kernel);
 
-            imshow("base_mark", base_C1);
+            // imshow("base_mark", base_grayscale);
 
-            if ( marcador.found(base_C1) )
+            // Verifica se achou o marcador na base
+            if ( marcador.found(base_grayscale) )
             {
                 kernel = Mat::ones(Size(3, 3), CV_8U);
 
                 marcador.biggest_rect.angle += SUM_ANGLE;
                 marcador.image = rotateToImage(base.image, marcador.biggest_rect);
-                marcador.resize(300, 300);
+                marcador.resize(400, 400);
                 marcador.improve_image();
 
 
                 ////// INICIO ROTAÇÃO DE IMAGEM //////
 
-                    cvtColor(marcador.image, img_teste, COLOR_BGR2HSV);
-                    inRange(img_teste, Scalar(ARR_MINMARCADOR_HSV[0], ARR_MINMARCADOR_HSV[1], ARR_MINMARCADOR_HSV[2]), Scalar(ARR_MAXMARCADOR_HSV[0], ARR_MAXMARCADOR_HSV[1], ARR_MAXMARCADOR_HSV[2]), img_inrange );
-                
-                    // inRange(marcador.image, Scalar(ARR_MINMARCADOR_BGR[0], ARR_MINMARCADOR_BGR[1], ARR_MINMARCADOR_BGR[2]), Scalar(ARR_MAXMARCADOR_BGR[0], ARR_MAXMARCADOR_BGR[1], ARR_MAXMARCADOR_BGR[2]), img_inrange );
-                    invert_color(img_inrange);
+                cvtColor(marcador.image, img_teste, COLOR_BGR2HSV);
+                inRange(img_teste, Scalar(ARR_MINMARCADOR_HSV[0], ARR_MINMARCADOR_HSV[1], ARR_MINMARCADOR_HSV[2]), Scalar(ARR_MAXMARCADOR_HSV[0], ARR_MAXMARCADOR_HSV[1], ARR_MAXMARCADOR_HSV[2]), img_inrange );
+                invert_color(img_inrange);
 
-                    marcador.getRectNumbersStatic(img_inrange);
+                imshow("img", img_inrange);
 
-                    img_percent = img_inrange(marcador.numbers[2]);
 
-                    string percent = getPercent(img_percent);
+                // Salva tres retangulos em posicoes fixas da imagem do marcador. (Numero superior, numero inferior e porcentagem)
+                // Salvo na variavel marcador.numbers
+                marcador.getRectNumbersStatic(img_inrange);
 
-                    imshow("img", img_inrange);
+                img_percent = img_inrange(marcador.numbers[2]);
 
-                    if (percent.compare("%") != 0){
-                        count_non_percent++;
+                string percent = getPercent(img_percent);
 
-                        if (count_percent > 0){
-                            count_percent--;
-                        }
+
+                // Verifica se foi encontrado o simbolo % na imagem
+                // Utilizado para realizar a rotacao da imagem futuramente
+                if (percent.compare("%") != 0){
+                    count_non_percent++;
+
+                    if (count_percent > 0){
+                        count_percent--;
                     }
-                    else{
-                        contador_frames++;
+                }
+                else{
+                    contador_frames++;
 
-                        img_number_bot = img_inrange(marcador.numbers[1]);
-                        img_number_top = img_inrange(marcador.numbers[0]);
+                    img_number_bot = img_inrange(marcador.numbers[1]);
+                    img_number_top = img_inrange(marcador.numbers[0]);
 
-                        int BORDER = 50;
+                    int BORDER = 50;
 
-                        copyMakeBorder(img_number_bot, img_number_bot, BORDER, BORDER, BORDER, BORDER, BORDER_ISOLATED, 255);
-                        copyMakeBorder(img_number_top, img_number_top, BORDER, BORDER, BORDER, BORDER, BORDER_ISOLATED, 255);
+                    copyMakeBorder(img_number_bot, img_number_bot, BORDER, BORDER, BORDER, BORDER, BORDER_ISOLATED, 255);
+                    copyMakeBorder(img_number_top, img_number_top, BORDER, BORDER, BORDER, BORDER, BORDER_ISOLATED, 255);
 
-                        string str_number_bot = tess.extract(img_number_bot, "bot");
-                        string str_number_top = tess.extract(img_number_top, "top");
+                    string str_number_bot = tess.extract(img_number_bot, "bot");
+                    string str_number_top = tess.extract(img_number_top, "top");
 
-                        // int int_number_bot = stoi(number_bot);
-                        // int int_number_top = stoi(number_top);
+                    ROS_INFO("TOP: %s   BOT: %s", str_number_top.c_str(), str_number_bot.c_str());
 
-                        // numbers_index_bot[int_number_bot]++;
-                        // numbers_index_top[int_number_top]++;
-
-                        // std::vector<int>::iterator iterator_bot = max_element(begin(numbers_index_bot), end(numbers_index_bot));
-                        // std::vector<int>::iterator iterator_bot = max_element(begin(numbers_index_bot), end(numbers_index_bot));
-
-                        ROS_INFO("TOP: %s   BOT: %s", str_number_top.c_str(), str_number_bot.c_str());
-
-                        count_percent++;
-                        if (count_non_percent > 0){
-                            count_non_percent--;
-                        }
-                    }
-
-
-                    if (count_non_percent >= 3)
-                    {
-                        SUM_ANGLE += 90;
+                    count_percent++;
+                    if (count_non_percent > 0){
                         count_non_percent--;
-                        if (SUM_ANGLE == 360){
-                            SUM_ANGLE = 0;
-                        }
                     }
+                }
 
-                // // string msg = "68: " + to_string((knn_10_percent / (float)contador_frames)*100) + "   10: " + to_string((tess_68_percent / (float)contador_frames)*100);
-                // // string msg = "68: " + to_string(tess_68_percent) + "  10: " + to_string(knn_10_percent) + "\nFrames: " + to_string(contador_frames);
-                // string msg = "68: " + number_top + "  10: " + number_bot + "\nFrames: " + to_string(contador_frames);
-                
-                // putText(marcador.image, msg, Point(10, 50), 1, 2.5, cvCOLOR_BLUE, 2);
-                // marcador.show("Marcador");
+
+                // Se teve três contagens que nao foram o simbolo %, rotaciona a imagem principal
+                if (count_non_percent >= 3)
+                {
+                    SUM_ANGLE += 90;
+                    count_non_percent--;
+                    if (SUM_ANGLE == 360){
+                        SUM_ANGLE = 0;
+                    }
+                }
             }
 
 
