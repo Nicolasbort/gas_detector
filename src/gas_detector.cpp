@@ -18,25 +18,25 @@ using namespace std;
 #define GAUSSIANFILTER 3
 #define KERNELSIZE 7
 
-
 // Limiares da cor azul ( Imagem HSV )
-#define MINBLUE         95
-#define MAXBLUE         120
+#define MINBLUE         105
+#define MAXBLUE         135
 
-#define MINSATBLUE      135
-#define MAXSATBLUE      180
+#define MINSATBLUE      50
+#define MAXSATBLUE      220
 
-#define MINVALBLUE      190
-#define MAXVALBLUE      235
+#define MINVALBLUE      50
+#define MAXVALBLUE      255
+
 
 // Limiares da cor amarela ( Imagem HSV )
-#define MINYELLOW       0
-#define MAXYELLOW       70
+#define MINYELLOW       15
+#define MAXYELLOW       35
 
-#define MINSATYELLOW    215
-#define MAXSATYELLOW    255
+#define MINSATYELLOW    50
+#define MAXSATYELLOW    220
 
-#define MINVALYELLOW    215
+#define MINVALYELLOW    50
 #define MAXVALYELLOW    255
 
 
@@ -46,12 +46,23 @@ int ARR_MINBLUE[3]   = {MINBLUE, MINSATBLUE, MINVALBLUE};
 int ARR_MAXYELLOW[3] = {MAXYELLOW, MAXSATYELLOW, MAXVALYELLOW};
 int ARR_MINYELLOW[3] = {MINYELLOW, MINSATYELLOW, MINVALYELLOW};
 
-int ARR_MAX_C2[3] = {25, 35, 45};
+int ARR_MAX_C2[3] = {60, 55, 60};
 int ARR_MIN_C2[3] = {0, 0, 0};
 
-int ARR_MAXMARCADOR_HSV[3] = {140, 40, 255};
-int ARR_MINMARCADOR_HSV[3] = {0, 0, 130};
+// MARCADOR HSV
+// H: 15  S: 40  V: 255
+// H: 0  S: 0  V: 195
 
+// MARCADOR BGR
+// H: 255  S: 255  V: 255
+// H: 220  S: 220  V: 220
+
+
+int ARR_MAXMARCADOR_HSV[3] = {30, 40, 255};
+int ARR_MINMARCADOR_HSV[3] = {0, 0, 150};
+
+int ARR_MAXMARCADOR_BGR[3] = {255, 255, 255};
+int ARR_MINMARCADOR_BGR[3] = {220, 220, 220};
 
 const int MIN_CONTOUR_AREA = 100;
 
@@ -233,7 +244,7 @@ public:
 
     ocr->Init(NULL, "eng", tesseract::OEM_LSTM_ONLY);
 
-    ocr->SetVariable("tessedit_char_whitelist","0123456789-%");
+    ocr->SetVariable("tessedit_char_whitelist","0123456789");
 
     ocr->SetPageSegMode(tesseract::PSM_SINGLE_LINE);
 
@@ -248,16 +259,19 @@ public:
   {
     string numbers;
 
-    GaussianBlur(img, img, Size(5, 5), 0.0);
-    medianBlur(img, img, 9);
-
-    imshow(name, img);
+    GaussianBlur(img, img, Size(7, 7), 0.0);
+    // medianBlur(img, img, 7);
+    morphologyEx(img, img, MORPH_ERODE, Mat::ones(Size(3, 3), CV_8U));
 
     ocr->SetImage(img.data, img.cols, img.rows, channels, img.step);
 
     ocr->SetSourceResolution(100);
 
     numbers = std::string(ocr->GetUTF8Text());
+    // numbers = regex_replace(numbers, regex(R"([^\d\-])"), "");
+
+    putText(img, numbers, Point(20, 50), FONT_HERSHEY_DUPLEX, 1.5, 150, 2);
+    imshow(name, img);
 
     return numbers;
   }
@@ -398,7 +412,6 @@ public:
         bool succ = false;
 
         RotatedRect rotRect;
-
 
 
         for (int i=0; i<this->contours.size(); i++)
@@ -732,19 +745,25 @@ void imageCallback(const sensor_msgs::ImageConstPtr& msg)
         Mat img_percent;
         Mat img_number_top, img_number_bot;
 
+        main_image.processImage();
+        // imshow("final", main_image.img_final_C1);
+        // imshow("yellow", main_image.img_yellow_C1);
+        // imshow("blue", main_image.img_blue_C1);
 		
 		// Verifica se achou a base
 		if ( main_image.foundMark() )
 		{
+
             Mat kernel = Mat::ones(Size(1, 1), CV_8U);
 
             base.set( main_image.image, main_image.markRotatedRect );
 
-            imshow("base_mark", base.image);
 
             inRange(base.image, Scalar(ARR_MIN_C2[0], ARR_MIN_C2[1], ARR_MIN_C2[2]), Scalar(ARR_MAX_C2[0], ARR_MAX_C2[1], ARR_MAX_C2[2]), base_C1);
             morphologyEx(base_C1, base_C1, MORPH_CLOSE, kernel);
             detailEnhance(base.image, base.image);
+
+            imshow("base_mark", base_C1);
 
             if ( marcador.found(base_C1) )
             {
@@ -752,7 +771,7 @@ void imageCallback(const sensor_msgs::ImageConstPtr& msg)
 
                 marcador.biggest_rect.angle += SUM_ANGLE;
                 marcador.image = rotateToImage(base.image, marcador.biggest_rect);
-                marcador.resize(400, 400);
+                marcador.resize(300, 300);
                 marcador.improve_image();
 
 
@@ -760,8 +779,9 @@ void imageCallback(const sensor_msgs::ImageConstPtr& msg)
 
                     cvtColor(marcador.image, img_teste, COLOR_BGR2HSV);
                     inRange(img_teste, Scalar(ARR_MINMARCADOR_HSV[0], ARR_MINMARCADOR_HSV[1], ARR_MINMARCADOR_HSV[2]), Scalar(ARR_MAXMARCADOR_HSV[0], ARR_MAXMARCADOR_HSV[1], ARR_MAXMARCADOR_HSV[2]), img_inrange );
+                
+                    // inRange(marcador.image, Scalar(ARR_MINMARCADOR_BGR[0], ARR_MINMARCADOR_BGR[1], ARR_MINMARCADOR_BGR[2]), Scalar(ARR_MAXMARCADOR_BGR[0], ARR_MAXMARCADOR_BGR[1], ARR_MAXMARCADOR_BGR[2]), img_inrange );
                     invert_color(img_inrange);
-                    
 
                     marcador.getRectNumbersStatic(img_inrange);
 
@@ -789,11 +809,8 @@ void imageCallback(const sensor_msgs::ImageConstPtr& msg)
                         copyMakeBorder(img_number_bot, img_number_bot, BORDER, BORDER, BORDER, BORDER, BORDER_ISOLATED, 255);
                         copyMakeBorder(img_number_top, img_number_top, BORDER, BORDER, BORDER, BORDER, BORDER_ISOLATED, 255);
 
-                        string raw_number_bot = tess.extract(img_number_bot, "bot");
-                        string raw_number_top = tess.extract(img_number_top, "top");
-
-                        string filtered_number_bot = regex_replace(raw_number_bot, regex(R"([^\d\-])"), "");
-                        string filtered_number_top = regex_replace(raw_number_top, regex(R"([^\d\-])"), "");
+                        string str_number_bot = tess.extract(img_number_bot, "bot");
+                        string str_number_top = tess.extract(img_number_top, "top");
 
                         // int int_number_bot = stoi(number_bot);
                         // int int_number_top = stoi(number_top);
@@ -804,7 +821,7 @@ void imageCallback(const sensor_msgs::ImageConstPtr& msg)
                         // std::vector<int>::iterator iterator_bot = max_element(begin(numbers_index_bot), end(numbers_index_bot));
                         // std::vector<int>::iterator iterator_bot = max_element(begin(numbers_index_bot), end(numbers_index_bot));
 
-                        ROS_INFO("TOP: %s   BOT: %s", filtered_number_top.c_str(), filtered_number_bot.c_str());
+                        ROS_INFO("TOP: %s   BOT: %s", str_number_top.c_str(), str_number_bot.c_str());
 
                         count_percent++;
                         if (count_non_percent > 0){
